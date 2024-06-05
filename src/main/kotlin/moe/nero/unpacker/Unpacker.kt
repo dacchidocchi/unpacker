@@ -10,9 +10,7 @@ object Unpacker {
      * Detects whether [source] is P.A.C.K.E.R. coded.
      * @param source The source string to detect.
      */
-    fun detect(source: String): Boolean {
-        return source.contains(packedRegex)
-    }
+    fun detect(source: String): Boolean = source.contains(packedRegex)
 
     /**
      * Unpacks P.A.C.K.E.R. packed js code.
@@ -24,11 +22,9 @@ object Unpacker {
         val matcher = packedRegex.find(source)!!
         val beginOffset = matcher.range.first
         val beginString = source.substring(0, beginOffset)
-        val sourceEnd = source.substring(beginOffset)
-
-        val endString = sourceEnd.split("')))", limit = 2).getOrElse(1) {
-            sourceEnd.split("}))", limit = 2).getOrNull(1) ?: ""
-        }
+        val endString =
+            source.substring(beginOffset)
+                .split("')))", "}))", limit = 2).getOrElse(1) { "" }
 
         val (payload, symtab, radix, count) = filterArgs(source)
         require(count == symtab.size) { "Malformed p.a.c.k.e.r. symtab. ($count != ${symtab.size})" }
@@ -36,48 +32,52 @@ object Unpacker {
         val unbase = Unbaser(radix)
         val lookup: (String) -> String = { word -> symtab[unbase(word)].ifEmpty { word } }
 
-        val newSource = payload
-            .replace("\\\\", "\\")
-            .replace("\\'", "'")
-            .replace(Regex("\\b\\w+\\b")) { match -> lookup(match.value) }
+        val newSource =
+            payload
+                .replace("\\\\", "\\")
+                .replace("\\'", "'")
+                .replace(Regex("\\b\\w+\\b")) { match -> lookup(match.value) }
 
         return replaceStrings(beginString, newSource, endString)
     }
 
     private fun filterArgs(source: String): Quadruple<String, List<String>, Int, Int> {
-        val juicers = listOf(
-            Regex("""}\('(.*)', *(\d+), *(\d+), *'(.*)'\.split\('\|'\), *(\d+), *(.*)\)\)"""),
-            Regex("""}\('(.*)', *(\d+), *(\d+), *'(.*)'\.split\('\|'\)"""),
-        )
-
-        for (juicer in juicers) {
-            val match = juicer.find(source) ?: continue
-
-            return Quadruple(
-                match.groupValues[1],
-                match.groupValues[4].split("|"),
-                match.groupValues[2].toInt(),
-                match.groupValues[3].toInt()
+        val juicers =
+            listOf(
+                Regex("""}\('(.*)', *(\d+), *(\d+), *'(.*)'\.split\('\|'\), *(\d+), *(.*)\)\)"""),
+                Regex("""}\('(.*)', *(\d+), *(\d+), *'(.*)'\.split\('\|'\)"""),
             )
+
+        juicers.forEach { juicer ->
+            juicer.find(source)?.let { match ->
+                return Quadruple(
+                    match.groupValues[1],
+                    match.groupValues[4].split("|"),
+                    match.groupValues[2].toInt(),
+                    match.groupValues[3].toInt(),
+                )
+            }
         }
 
         throw IllegalArgumentException("Could not make sense of p.a.c.k.e.r data (unexpected code structure)")
     }
 
-    private fun replaceStrings(begin: String, source: String, end: String): String {
+    private fun replaceStrings(
+        begin: String,
+        source: String,
+        end: String,
+    ): String {
         val match = Regex("var *(_\\w+)=\"(.*?)\";").find(source)
-
-        if (match != null) {
-            val (varName, strings) = match.destructured
-            val startPoint = match.range.last + 1
+        match?.let {
+            val (varName, strings) = it.destructured
             val lookup = strings.split("\",\"")
-            val variable = "%s[%d]".format(varName)
-            var modifiedSource = source
-            for ((index, value) in lookup.withIndex()) {
-                modifiedSource = modifiedSource.replace(variable.format(index), "\"$value\"")
-            }
-            return modifiedSource.substring(startPoint)
+            val modifiedSource =
+                lookup.withIndex().fold(source) { acc, (index, value) ->
+                    acc.replace("$varName[$index]", "\"$value\"")
+                }
+            return begin + modifiedSource.substring(it.range.last + 1) + end
         }
+
         return begin + source + end
     }
 }
